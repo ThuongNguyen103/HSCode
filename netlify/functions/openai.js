@@ -7,7 +7,7 @@ exports.handler = async function (event) {
   try {
     const body = JSON.parse(event.body || "{}");
     const messages = body.messages || [];
-    const model = body.model || "gpt-4o-mini";
+    const model = body.model || "gpt-3.5-turbo";
     const temperature = body.temperature ?? 0;
     const max_tokens = body.max_tokens ?? 1000;
 
@@ -41,3 +41,4 @@ exports.handler = async function (event) {
     };
   }
 };
+
