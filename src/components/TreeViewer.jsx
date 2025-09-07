@@ -131,11 +131,23 @@ function getFullDescription(node, tree) {
 
 // ----------- GỌI OPENAI QUA NETLIFY FUNCTION -----------
 async function callOpenAI(payload) {
+  // payload là object đã chuẩn bị (model, messages, ...)
   const res = await fetch("/.netlify/functions/openai", {
-  method: "POST",
-  headers: { "Content-Type": "application/json" },
-  body: JSON.stringify({ query: searchQuery }),
-});
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload), // sử dụng payload thay vì searchQuery
+  });
+
+  const data = await res.json();
+  let parsed = {};
+  try {
+    parsed = JSON.parse(data.result); // parse kết quả từ backend
+  } catch (e) {
+    console.error("Invalid JSON from backend:", data.result);
+  }
+
+  return parsed; // return kết quả để handleSearch dùng
+}
 
 const data = await res.json();
 let parsed = {};
@@ -199,86 +211,84 @@ export default function TreeViewer() {
   );
 
   const handleSearch = useCallback(async () => {
-    if (!searchQuery.trim()) {
-      setSearchResults([]);
-      return;
-    }
-    setSearchLoading(true);
-    setSearchError(null);
+  if (!searchQuery.trim()) {
     setSearchResults([]);
+    return;
+  }
+  setSearchLoading(true);
+  setSearchError(null);
+  setSearchResults([]);
 
-    try {
-      // Step 1: gọi GPT để phân tích keywords
-      const extractContent = await callOpenAI({
-        model: "gpt-4o-mini",
-        messages: [
-          {
-            role: "system",
-            content: `You are an HS code expert. Extract the main object and context keywords. 
-Output JSON like: {"objectKeywords": [...], "contextKeywords": [...]}`
-          },
-          { role: "user", content: searchQuery },
-        ],
-        temperature: 0,
-      });
+  try {
+    // Step 1: gọi GPT để phân tích keywords
+    const extractContent = await callOpenAI({
+      model: "gpt-4o-mini",
+      messages: [
+        {
+          role: "system",
+          content: `You are an HS code expert. Extract the main object and context keywords. 
+Output JSON like: {"objectKeywords": [...], "contextKeywords": [...]}`,
+        },
+        { role: "user", content: searchQuery }, // sử dụng searchQuery từ state
+      ],
+      temperature: 0,
+    });
 
-      const parsedExtract = JSON.parse(extractContent);
-      const objectKeywords = (parsedExtract.objectKeywords || []).map((k) =>
-        k.toLowerCase()
-      );
-      const contextKeywords = (parsedExtract.contextKeywords || []).map((k) =>
-        k.toLowerCase()
-      );
+    const objectKeywords = (extractContent.objectKeywords || []).map((k) =>
+      k.toLowerCase()
+    );
+    const contextKeywords = (extractContent.contextKeywords || []).map((k) =>
+      k.toLowerCase()
+    );
 
-      // Step 2: lọc và chấm điểm local
-      const flatData = flattenTree(treeData);
-      const candidates = flatData.filter((n) => n.htsno && n.description);
+    // Step 2: lọc và chấm điểm local
+    const flatData = flattenTree(treeData);
+    const candidates = flatData.filter((n) => n.htsno && n.description);
 
-      const scored = candidates.map((c) => {
-        const fullDescription = getFullDescription(c, treeData);
-        const allKeywords = [...objectKeywords, ...contextKeywords];
-        const matchCount = allKeywords.filter((kw) =>
-          fullDescription.toLowerCase().includes(kw)
-        ).length;
-        return { ...c, fullDescription, localSim: matchCount };
-      });
+    const scored = candidates.map((c) => {
+      const fullDescription = getFullDescription(c, treeData);
+      const allKeywords = [...objectKeywords, ...contextKeywords];
+      const matchCount = allKeywords.filter((kw) =>
+        fullDescription.toLowerCase().includes(kw)
+      ).length;
+      return { ...c, fullDescription, localSim: matchCount };
+    });
 
-      const topCandidates = scored
-        .sort((a, b) => b.localSim - a.localSim)
-        .slice(0, 30);
+    const topCandidates = scored
+      .sort((a, b) => b.localSim - a.localSim)
+      .slice(0, 30);
 
-      // Step 3: Gọi GPT để xếp hạng
-      const rankContent = await callOpenAI({
-        model: "gpt-4o-mini",
-        messages: [
-          {
-            role: "system",
-            content: `Rank HS code candidates for this query.
+    // Step 3: Gọi GPT để xếp hạng
+    const rankContent = await callOpenAI({
+      model: "gpt-4o-mini",
+      messages: [
+        {
+          role: "system",
+          content: `Rank HS code candidates for this query.
 Output JSON array of top 10:
 [{"htsno":"...","description":"...","score":95,"explanation":"..."}]`,
-          },
-          {
-            role: "user",
-            content: `ObjectKeywords: ${JSON.stringify(
-              objectKeywords
-            )}\nContextKeywords: ${JSON.stringify(
-              contextKeywords
-            )}\nCandidates: ${JSON.stringify(topCandidates)}`,
-          },
-        ],
-        temperature: 0,
-        max_tokens: 1000,
-      });
+        },
+        {
+          role: "user",
+          content: `ObjectKeywords: ${JSON.stringify(
+            objectKeywords
+          )}\nContextKeywords: ${JSON.stringify(
+            contextKeywords
+          )}\nCandidates: ${JSON.stringify(topCandidates)}`,
+        },
+      ],
+      temperature: 0,
+      max_tokens: 1000,
+    });
 
-      const parsedRank = JSON.parse(rankContent);
-      setSearchResults(parsedRank.slice(0, 10));
-    } catch (err) {
-      console.error("Search error:", err);
-      setSearchError(err.message);
-    } finally {
-      setSearchLoading(false);
-    }
-  }, [searchQuery, treeData]);
+    setSearchResults(rankContent.slice(0, 10));
+  } catch (err) {
+    console.error("Search error:", err);
+    setSearchError(err.message);
+  } finally {
+    setSearchLoading(false);
+  }
+}, [searchQuery, treeData]);
 
   const handleSelectResult = useCallback(
     (htsno) => {
@@ -424,4 +434,5 @@ Output JSON array of top 10:
     </div>
   );
 }
+
 
