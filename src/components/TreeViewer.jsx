@@ -129,7 +129,7 @@ function getFullDescription(node, tree) {
     .join("");
 }
 
-async function callOpenAI(messages, model = "gpt-4o-mini") {
+async function callOpenAI(messages, model = "gpt-3.5-turbo") {
   const res = await fetch("/.netlify/functions/openai", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -453,6 +453,7 @@ Candidates: ${JSON.stringify(scored)}`,
     </div>
   );
 }
+
 
 
 
