@@ -1,16 +1,14 @@
 // netlify/functions/openai.js
-import { OpenAI } from "openai"; // <-- dùng named import
+const OpenAI = require("openai"); // dùng require thay vì import
 
-const client = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
-});
+// tạo client
+const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
-export async function handler(event) {
+exports.handler = async function (event, context) {
   try {
     const body = JSON.parse(event.body || "{}");
     const query = body.query || "";
 
-    // Gọi OpenAI Chat Completions
     const completion = await client.chat.completions.create({
       model: "gpt-4o-mini",
       messages: [
@@ -39,4 +37,4 @@ export async function handler(event) {
       body: JSON.stringify({ error: err.message }),
     };
   }
-}
+};
