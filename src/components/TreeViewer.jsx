@@ -143,9 +143,14 @@ async function callGemini(messages, model = "gemini-2.5-flash-preview-05-20", sy
 
   const data = await res.json();
   
-  // Bỏ qua đoạn code phân tích JSON từ chuỗi và trả về kết quả
-  // Gemini đã trả về JSON trực tiếp trong trường `result`, không cần parse
-  return data.result;
+  // Phân tích cú pháp chuỗi JSON thành đối tượng JavaScript
+  try {
+    const parsedResult = JSON.parse(data.result);
+    return parsedResult;
+  } catch (e) {
+    console.error("Failed to parse JSON result from Gemini:", e);
+    throw new Error("Invalid JSON format received from API");
+  }
 }
 
 
@@ -381,8 +386,7 @@ Guidelines:
                           <td className="px-4 py-2 border text-sm text-gray-600 italic">
                             {result.explanation}
                           </td>
-                        </tr>
-                      ))}
+                      </tr>
                     </tbody>
                   </table>
                 </div>
