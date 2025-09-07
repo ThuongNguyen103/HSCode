@@ -432,10 +432,9 @@ Guidelines:
                   dangerouslySetInnerHTML={{
                     __html: collectWithParents(currentPath),
                   }}
-                />
+              </div>
               </div>
             </div>
-          </div>
         </>
       )}
     </div>
