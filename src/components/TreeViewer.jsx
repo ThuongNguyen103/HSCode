@@ -129,6 +129,25 @@ function getFullDescription(node, tree) {
     .join("");
 }
 
+// ----------- GỌI OPENAI QUA NETLIFY FUNCTION -----------
+async function callOpenAI(payload) {
+  const resp = await fetch("/.netlify/functions/openai", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      url: "https://api.openai.com/v1/chat/completions",
+      payload,
+    }),
+  });
+
+  if (!resp.ok) {
+    throw new Error(`OpenAI proxy failed: ${resp.status}`);
+  }
+
+  const data = await resp.json();
+  return data.content; // chỉ lấy phần text content trả về
+}
+
 export default function TreeViewer() {
   const [treeData, setTreeData] = useState([]);
   const [currentPath, setCurrentPath] = useState([]);
@@ -148,11 +167,6 @@ export default function TreeViewer() {
           throw new Error(`HTTP error! status: ${resp.status}`);
         }
         const data = await resp.json();
-        if (!Array.isArray(data) && !data.children) {
-          throw new Error(
-            "Invalid JSON structure: Expected an array or object with 'children'"
-          );
-        }
         setTreeData(Array.isArray(data) ? data : data.children || []);
       } catch (err) {
         setError(err.message);
@@ -195,31 +209,21 @@ export default function TreeViewer() {
     setSearchResults([]);
 
     try {
-      // Step 1: Extract object + context keywords
-      const extractRes = await fetch("/.netlify/functions/openai", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          url: "https://api.openai.com/v1/chat/completions",
-          payload: {
-            model: "gpt-4o-mini",
-            messages: [
-              {
-                role: "system",
-                content: `You are an assistant specialized in HS code search...`,
-              },
-              { role: "user", content: searchQuery },
-            ],
-            temperature: 0,
+      // Step 1: gọi GPT để phân tích keywords
+      const extractContent = await callOpenAI({
+        model: "gpt-4o-mini",
+        messages: [
+          {
+            role: "system",
+            content: `You are an HS code expert. Extract the main object and context keywords. 
+Output JSON like: {"objectKeywords": [...], "contextKeywords": [...]}`
           },
-        }),
+          { role: "user", content: searchQuery },
+        ],
+        temperature: 0,
       });
 
-      if (!extractRes.ok)
-        throw new Error(`Keyword extraction failed: ${extractRes.status}`);
-      const extractData = await extractRes.json();
-      const parsedExtract = JSON.parse(extractData.choices[0].message.content);
-
+      const parsedExtract = JSON.parse(extractContent);
       const objectKeywords = (parsedExtract.objectKeywords || []).map((k) =>
         k.toLowerCase()
       );
@@ -227,96 +231,48 @@ export default function TreeViewer() {
         k.toLowerCase()
       );
 
-      // Step 2: Local prune top 30 by simple similarity
+      // Step 2: lọc và chấm điểm local
       const flatData = flattenTree(treeData);
-      const candidates = flatData
-        .filter((n) => n && n.htsno && n.description)
-        .map((n) => ({
-          htsno: n.htsno,
-          description: n.description,
-          fullDescription: getFullDescription(n, treeData),
-        }));
+      const candidates = flatData.filter((n) => n.htsno && n.description);
 
-      const allKeywords = [...objectKeywords, ...contextKeywords];
-      const searchKeywords = allKeywords.join(" ");
-      const scored = candidates
-        .map((c) => ({
-          ...c,
-          localSim: searchKeywords
-            ? searchKeywords
-                .split(" ")
-                .filter((kw) => c.fullDescription.toLowerCase().includes(kw))
-                .length
-            : 0,
-        }))
+      const scored = candidates.map((c) => {
+        const fullDescription = getFullDescription(c, treeData);
+        const allKeywords = [...objectKeywords, ...contextKeywords];
+        const matchCount = allKeywords.filter((kw) =>
+          fullDescription.toLowerCase().includes(kw)
+        ).length;
+        return { ...c, fullDescription, localSim: matchCount };
+      });
+
+      const topCandidates = scored
         .sort((a, b) => b.localSim - a.localSim)
         .slice(0, 30);
 
-      // Step 3: Ask GPT to rank top 10 with scores
-      const rankRes = await fetch(
-        "https://api.openai.com/v1/chat/completions",
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${apiKey}`,
+      // Step 3: Gọi GPT để xếp hạng
+      const rankContent = await callOpenAI({
+        model: "gpt-4o-mini",
+        messages: [
+          {
+            role: "system",
+            content: `Rank HS code candidates for this query.
+Output JSON array of top 10:
+[{"htsno":"...","description":"...","score":95,"explanation":"..."}]`,
           },
-          body: JSON.stringify({
-            model: "gpt-4o-mini",
-            messages: [
-              {
-                role: "system",
-                content: `You are an assistant that ranks HS code candidates for a search query.
-
-Guidelines:
-1. Always prefer the most specific HS code (leaf nodes with longer codes) when multiple candidates match the same keywords.
-   - Example: If both "0203.12" and "0203.12.10.10" match, then "0203.12.10.10" MUST have a higher score than its parent "0203.12".
-   - Leaf codes should normally score at least 5–10% higher than their parent if both are relevant.
-2. Strong match = objectKeywords (e.g., ham, pork leg) + contextKeywords (e.g., chilled, frozen, processed).
-3. If contextKeywords contain ["historical","ancient","collectible","currency"], strongly prefer heading 9705 and its children.
-4. Medium match = only object or only context.
-5. Weak match = only partial or vague relation.
-6. Penalize parent/general codes if a more specific child code matches; parent codes should not appear above their children in the ranking.
-7. Ignore irrelevant domains (e.g., watches, jewelry) if objectKeywords contain "coin" or "currency".
-8. Output only JSON array of top 10 like:
-   [{"htsno": "...", "description": "...", "score": 95, "explanation": "..."}]`,
-              },
-              {
-                role: "user",
-                content: `ObjectKeywords: ${JSON.stringify(
-                  objectKeywords
-                )}\nContextKeywords: ${JSON.stringify(
-                  contextKeywords
-                )}\nCandidates: ${JSON.stringify(scored)}`,
-              },
-            ],
-            temperature: 0,
-            max_tokens: 1000,
-          }),
-        }
-      );
-
-      if (!rankRes.ok) throw new Error(`Ranking failed: ${rankRes.status}`);
-      const rankData = await rankRes.json();
-      const messageContent = rankData.choices[0].message.content;
-      let parsedRank = [];
-      try {
-        parsedRank = JSON.parse(messageContent);
-      } catch (e) {
-        const match = messageContent.match(/\[[\s\S]*\]/);
-        if (match) parsedRank = JSON.parse(match[0]);
-      }
-
-      // Merge lại fullDescription từ local candidates
-      const enrichedRank = parsedRank.map((r) => {
-        const found = scored.find((c) => c.htsno === r.htsno);
-        return {
-          ...r,
-          fullDescription: found ? found.fullDescription : r.description,
-        };
+          {
+            role: "user",
+            content: `ObjectKeywords: ${JSON.stringify(
+              objectKeywords
+            )}\nContextKeywords: ${JSON.stringify(
+              contextKeywords
+            )}\nCandidates: ${JSON.stringify(topCandidates)}`,
+          },
+        ],
+        temperature: 0,
+        max_tokens: 1000,
       });
 
-      setSearchResults(enrichedRank.slice(0, 10));
+      const parsedRank = JSON.parse(rankContent);
+      setSearchResults(parsedRank.slice(0, 10));
     } catch (err) {
       console.error("Search error:", err);
       setSearchError(err.message);
@@ -343,7 +299,7 @@ Guidelines:
         <div className="error-message">Error: {error}</div>
       ) : (
         <>
-          {/* Thanh tìm kiếm */}
+          {/* Search bar */}
           <div className="mb-6">
             <div className="flex items-center w-full bg-white rounded-xl shadow-md border border-gray-300 overflow-hidden">
               <div className="px-3 text-gray-500">
@@ -354,7 +310,7 @@ Guidelines:
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 placeholder="🔍 Search HS Code (any language)..."
-                className="w-[70%] px-4 py-3 text-base focus:outline-none focus:ring-2 focus:ring-blue-500" // Thay w-full bằng w-[70%] và thêm style inline
+                className="w-[70%] px-4 py-3 text-base focus:outline-none focus:ring-2 focus:ring-blue-500"
                 style={{ minWidth: "500px" }}
               />
               <button
@@ -373,7 +329,7 @@ Guidelines:
 
           {/* Layout 2 cột */}
           <div className="flex flex-1 border rounded-lg overflow-hidden shadow">
-            {/* Cột trái: danh sách kết quả */}
+            {/* Left: search results */}
             <div className="w-1/3 bg-white border-r overflow-y-auto">
               <h2 className="text-lg font-semibold p-4 border-b">
                 Search Results
@@ -383,16 +339,12 @@ Guidelines:
                   <table className="min-w-full border border-gray-500 rounded-lg shadow-sm border-collapse">
                     <thead className="bg-gray-100">
                       <tr>
-                        <th className="w-1/6 px-4 py-2 text-left text-sm font-semibold text-gray-700 border border-gray-500">
-                          HS Code
-                        </th>
-                        <th className="w-1/12 px-4 py-2 text-left text-sm font-semibold text-gray-700 border border-gray-500">
-                          Score
-                        </th>
-                        <th className="w-2/6 px-4 py-2 text-left text-sm font-semibold text-gray-700 border border-gray-500">
+                        <th className="px-4 py-2 text-left border">HS Code</th>
+                        <th className="px-4 py-2 text-left border">Score</th>
+                        <th className="px-4 py-2 text-left border">
                           Full Description
                         </th>
-                        <th className="w-3/6 px-4 py-2 text-left text-sm font-semibold text-gray-700 border border-gray-500">
+                        <th className="px-4 py-2 text-left border">
                           Explanation
                         </th>
                       </tr>
@@ -404,19 +356,17 @@ Guidelines:
                           className="hover:bg-gray-50 cursor-pointer"
                           onClick={() => handleSelectResult(result.htsno)}
                         >
-                          <td className="px-4 py-2 border border-gray-500 font-semibold text-blue-700 truncate">
+                          <td className="px-4 py-2 border font-semibold text-blue-700 truncate">
                             {result.htsno}
                           </td>
-                          <td className="px-4 py-2 border border-gray-500">
-                            {result.score}%
-                          </td>
+                          <td className="px-4 py-2 border">{result.score}%</td>
                           <td
-                            className="px-4 py-2 border border-gray-500"
+                            className="px-4 py-2 border"
                             dangerouslySetInnerHTML={{
                               __html: result.fullDescription,
                             }}
                           />
-                          <td className="px-4 py-2 border border-gray-500 text-sm text-gray-600 italic">
+                          <td className="px-4 py-2 border text-sm text-gray-600 italic">
                             {result.explanation}
                           </td>
                         </tr>
@@ -429,7 +379,7 @@ Guidelines:
               )}
             </div>
 
-            {/* Cột phải: chi tiết */}
+            {/* Right: details */}
             <div className="flex-1 p-4 overflow-y-auto">
               <div className="flex items-center mb-4">
                 {currentPath.length > 0 && (
@@ -445,7 +395,6 @@ Guidelines:
                 </h1>
               </div>
 
-              {/* Cây con */}
               <div className="mb-6">
                 {memoizedChildren.length > 0 ? (
                   memoizedChildren.map((node, idx) => (
@@ -460,7 +409,6 @@ Guidelines:
                 )}
               </div>
 
-              {/* Mô tả */}
               <div className="bg-white border rounded-lg shadow p-4">
                 <h2 className="text-lg font-semibold mb-2">Description</h2>
                 <div
