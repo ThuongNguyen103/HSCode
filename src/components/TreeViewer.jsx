@@ -149,16 +149,6 @@ async function callOpenAI(payload) {
   return parsed; // return kết quả để handleSearch dùng
 }
 
-const data = await res.json();
-let parsed = {};
-try {
-  parsed = JSON.parse(data.result);
-} catch (e) {
-  console.error("Invalid JSON from backend:", data.result);
-}
-
-}
-
 export default function TreeViewer() {
   const [treeData, setTreeData] = useState([]);
   const [currentPath, setCurrentPath] = useState([]);
@@ -434,6 +424,7 @@ Output JSON array of top 10:
     </div>
   );
 }
+
 
 
 
