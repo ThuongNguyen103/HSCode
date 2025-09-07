@@ -434,7 +434,7 @@ Guidelines:
                   }}
               </div>
               </div>
-            </div>
+          </div>
         </>
       )}
     </div>
