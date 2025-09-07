@@ -1,33 +1,36 @@
 // netlify/functions/openai.js
-const OpenAI = require("openai"); // dùng require thay vì import
+const OpenAI = require("openai");
 
-// tạo client
 const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
-exports.handler = async function (event, context) {
+exports.handler = async function (event) {
   try {
     const body = JSON.parse(event.body || "{}");
-    const query = body.query || "";
+    const messages = body.messages || [];
+    const model = body.model || "gpt-4o-mini";
+    const temperature = body.temperature ?? 0;
+    const max_tokens = body.max_tokens ?? 1000;
 
     const completion = await client.chat.completions.create({
-      model: "gpt-4o-mini",
-      messages: [
-        {
-          role: "system",
-          content: "Extract object and context keywords from the query. Return only JSON.",
-        },
-        { role: "user", content: query },
-      ],
-      temperature: 0,
-      max_tokens: 1000,
+      model,
+      messages,
+      temperature,
+      max_tokens,
     });
+
+    // parse JSON nếu GPT trả về string
+    let result = completion.choices[0]?.message?.content || "{}";
+    try {
+      const parsed = JSON.parse(result);
+      result = parsed;
+    } catch (e) {
+      // fallback: return raw string
+    }
 
     return {
       statusCode: 200,
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        result: completion.choices[0].message.content || "{}",
-      }),
+      body: JSON.stringify({ result }),
     };
   } catch (err) {
     console.error("OpenAI error:", err);
