@@ -205,22 +205,25 @@ export default function TreeViewer() {
   );
 
   const handleSearch = useCallback(async () => {
-    if (!searchQuery.trim()) {
-      setSearchResults([]);
-      return;
-    }
-    setSearchLoading(true);
-    setSearchError(null);
+  if (!searchQuery.trim()) {
     setSearchResults([]);
+    return;
+  }
+  setSearchLoading(true);
+  setSearchError(null);
+  setSearchResults([]);
 
-    try {
-      // Step 1: extract keywords
-      const extractContent = await callGemini(
-        [{ parts: [{ text: searchQuery }] }],
-        "gemini-2.5-flash-preview-05-20",
-        {
-          parts: [{
-            text: `You are an assistant specialized in HS code search.
+  try {
+    // Step 1: Extract object + context keywords
+    const extractRes = await fetch("/.netlify/functions/openai", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        model: "gpt-4o-mini",
+        messages: [
+          {
+            role: "system",
+            content: `You are an assistant specialized in HS code search.
 Return JSON only:
 {
   "translated": "...",
@@ -231,83 +234,84 @@ Rules:
 - Extract nouns that represent goods into objectKeywords (coin, horse, textile).
 - Extract modifiers, attributes, and historical/cultural references into contextKeywords (gold, ancient, historical, collectible, currency).
 - Normalize historical references (e.g., "Ly Thai To" -> "historical", "ancient", "Vietnamese history").`,
-          }],
-        },
-      );
+          },
+          { role: "user", content: searchQuery },
+        ],
+        temperature: 0,
+      }),
+    });
 
-      const objectKeywords = Array.isArray(extractContent.objectKeywords)
-        ? extractContent.objectKeywords.map((k) => k.toLowerCase())
-        : [];
-      const contextKeywords = Array.isArray(extractContent.contextKeywords)
-        ? extractContent.contextKeywords.map((k) => k.toLowerCase())
-        : [];
+    if (!extractRes.ok) throw new Error(`Keyword extraction failed: ${extractRes.status}`);
+    const extractData = await extractRes.json();
+    const parsedExtract = extractData.result;
 
-      // Step 2: local scoring
-      const flatData = flattenTree(treeData);
-      const candidates = flatData.filter((n) => n.htsno && n.description);
-      const scored = candidates
-        .map((c) => ({
-          ...c,
-          fullDescription: getFullDescription(c, treeData),
-          localSim: [...objectKeywords, ...contextKeywords].filter((kw) =>
-            getFullDescription(c, treeData).toLowerCase().includes(kw)
-          ).length,
-        }))
-        .sort((a, b) => b.localSim - a.localSim)
-        .slice(0, 30);
+    const objectKeywords = (parsedExtract.objectKeywords || []).map((k) => k.toLowerCase());
+    const contextKeywords = (parsedExtract.contextKeywords || []).map((k) => k.toLowerCase());
 
-      // Step 3: Gemini ranking
-      const topResultsResponse = await callGemini(
-        [{ parts: [{ text: `ObjectKeywords: ${JSON.stringify(objectKeywords)}
-ContextKeywords: ${JSON.stringify(contextKeywords)}
-Candidates: ${JSON.stringify(scored)}` }] }],
-        "gemini-2.5-flash-preview-05-20",
-        {
-          parts: [{
-            text: `You are an assistant that ranks HS code candidates for a search query.
+    // Step 2: Local scoring (same như trước)
+    const flatData = flattenTree(treeData);
+    const candidates = flatData.filter((n) => n.htsno && n.description);
+    const scored = candidates
+      .map((c) => ({
+        ...c,
+        fullDescription: getFullDescription(c, treeData),
+        localSim: [...objectKeywords, ...contextKeywords].filter((kw) =>
+          getFullDescription(c, treeData).toLowerCase().includes(kw)
+        ).length,
+      }))
+      .sort((a, b) => b.localSim - a.localSim)
+      .slice(0, 30);
+
+    // Step 3: Ask GPT to rank top 10 with scores
+    const rankRes = await fetch("/.netlify/functions/openai", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        model: "gpt-4o-mini",
+        messages: [
+          {
+            role: "system",
+            content: `You are an assistant that ranks HS code candidates for a search query.
 
 Guidelines:
 1. Always prefer the most specific HS code (leaf nodes with longer codes) when multiple candidates match the same keywords.
-   - Example: If both "0203.12" and "0203.12.10.10" match, then "0203.12.10.10" MUST have a higher score than its parent "0203.12".
-   - Leaf codes should normally score at least 5–10% higher than their parent if both are relevant.
-2. Strong match = objectKeywords (e.g., ham, pork leg) + contextKeywords (e.g., chilled, frozen, processed).
-3. If contextKeywords contain ["historical","ancient","collectible","currency"], strongly prefer heading 9705 and its children.
-4. Medium match = only object or only context.
-5. Weak match = only partial or vague relation.
-6. Penalize parent/general codes if a more specific child code matches; parent codes should not appear above their children in the ranking.
-7. Ignore irrelevant domains (e.g., watches, jewelry) if objectKeywords contain "coin" or "currency".
-8. Output only JSON array of top 10 like:
+2. Strong match = objectKeywords + contextKeywords.
+3. Medium match = only object or only context.
+4. Weak match = only partial or vague relation.
+5. Penalize parent/general codes if a more specific child code matches.
+6. Output only JSON array of top 10 like:
    [{"htsno": "...", "description": "...", "score": 95, "explanation": "..."}]`,
-          }],
-        },
-      );
+          },
+          {
+            role: "user",
+            content: `ObjectKeywords: ${JSON.stringify(objectKeywords)}
+ContextKeywords: ${JSON.stringify(contextKeywords)}
+Candidates: ${JSON.stringify(scored)}`,
+          },
+        ],
+        temperature: 0,
+        max_tokens: 1000,
+      }),
+    });
 
-      // Đảm bảo topResults là mảng bằng cách parse nếu cần
-      let topResults = topResultsResponse;
-      if (typeof topResultsResponse === "string") {
-        try {
-          topResults = JSON.parse(topResultsResponse);
-        } catch (e) {
-          console.error("Failed to parse topResults:", e);
-          throw new Error("Invalid JSON format from Gemini ranking");
-        }
-      }
+    if (!rankRes.ok) throw new Error(`Ranking failed: ${rankRes.status}`);
+    const rankData = await rankRes.json();
+    const topResults = Array.isArray(rankData.result) ? rankData.result : [];
 
-      // Merge fullDescription from local
-      const enrichedRank = Array.isArray(topResults) ? topResults.map((r) => {
-        const found = scored.find((c) => c.htsno === r.htsno);
-        return { ...r, fullDescription: found?.fullDescription || r.description };
-      }) : [];
+    // Merge fullDescription từ local
+    const enrichedRank = topResults.map((r) => {
+      const found = scored.find((c) => c.htsno === r.htsno);
+      return { ...r, fullDescription: found ? found.fullDescription : r.description };
+    });
 
-      setSearchResults(enrichedRank.slice(0, 10));
-    } catch (err) {
-      console.error(err);
-      setSearchError(err.message);
-    } finally {
-      setSearchLoading(false);
-    }
-  }, [searchQuery, treeData]);
-
+    setSearchResults(enrichedRank.slice(0, 10));
+  } catch (err) {
+    console.error(err);
+    setSearchError(err.message);
+  } finally {
+    setSearchLoading(false);
+  }
+}, [searchQuery, treeData]);
   const handleSelectResult = useCallback(
     (htsno) => {
       const path = findPathToNode(treeData, htsno);
@@ -452,3 +456,4 @@ Guidelines:
     </div>
   );
 }
+
