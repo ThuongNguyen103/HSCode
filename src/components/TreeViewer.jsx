@@ -135,7 +135,7 @@ async function callOpenAI(payload) {
   const res = await fetch("/.netlify/functions/openai", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload), // sử dụng payload thay vì searchQuery
+    body: JSON.stringify(payload), // sử dụng payload
   });
 
   const data = await res.json();
@@ -434,5 +434,6 @@ Output JSON array of top 10:
     </div>
   );
 }
+
 
 
