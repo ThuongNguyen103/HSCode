@@ -131,21 +131,20 @@ function getFullDescription(node, tree) {
 
 // ----------- GỌI OPENAI QUA NETLIFY FUNCTION -----------
 async function callOpenAI(payload) {
-  const resp = await fetch("/.netlify/functions/openai", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      url: "https://api.openai.com/v1/chat/completions",
-      payload,
-    }),
-  });
+  const res = await fetch("/.netlify/functions/openai", {
+  method: "POST",
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify({ query: searchQuery }),
+});
 
-  if (!resp.ok) {
-    throw new Error(`OpenAI proxy failed: ${resp.status}`);
-  }
+const data = await res.json();
+let parsed = {};
+try {
+  parsed = JSON.parse(data.result);
+} catch (e) {
+  console.error("Invalid JSON from backend:", data.result);
+}
 
-  const data = await resp.json();
-  return data.content; // chỉ lấy phần text content trả về
 }
 
 export default function TreeViewer() {
@@ -425,3 +424,4 @@ Output JSON array of top 10:
     </div>
   );
 }
+
