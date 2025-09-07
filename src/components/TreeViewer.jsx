@@ -257,7 +257,7 @@ Rules:
         .slice(0, 30);
 
       // Step 3: Gemini ranking
-      const topResults = await callGemini(
+      const topResultsResponse = await callGemini(
         [{ parts: [{ text: `ObjectKeywords: ${JSON.stringify(objectKeywords)}
 ContextKeywords: ${JSON.stringify(contextKeywords)}
 Candidates: ${JSON.stringify(scored)}` }] }],
@@ -282,11 +282,22 @@ Guidelines:
         },
       );
 
+      // Đảm bảo topResults là mảng bằng cách parse nếu cần
+      let topResults = topResultsResponse;
+      if (typeof topResultsResponse === "string") {
+        try {
+          topResults = JSON.parse(topResultsResponse);
+        } catch (e) {
+          console.error("Failed to parse topResults:", e);
+          throw new Error("Invalid JSON format from Gemini ranking");
+        }
+      }
+
       // Merge fullDescription from local
-      const enrichedRank = topResults.map((r) => {
+      const enrichedRank = Array.isArray(topResults) ? topResults.map((r) => {
         const found = scored.find((c) => c.htsno === r.htsno);
         return { ...r, fullDescription: found?.fullDescription || r.description };
-      });
+      }) : [];
 
       setSearchResults(enrichedRank.slice(0, 10));
     } catch (err) {
