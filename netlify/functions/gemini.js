@@ -1,12 +1,12 @@
-exports.handler = async function (event) {
+export async function handler(event) {
   try {
-    // Sử dụng import() động để nhập node-fetch
+    // Import động node-fetch vì nó là một ES module
     const { default: fetch } = await import("node-fetch");
 
     const body = JSON.parse(event.body || "{}");
     const { messages, model, temperature, max_tokens, systemInstruction } = body;
 
-    const apiKey = process.env.GEMINI_API_KEY; // Replace with your environment variable name
+    const apiKey = process.env.GEMINI_API_KEY; 
     const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
 
     const payload = {
