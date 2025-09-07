@@ -129,24 +129,28 @@ function getFullDescription(node, tree) {
     .join("");
 }
 
-// ----------- GỌI OPENAI QUA NETLIFY FUNCTION -----------
 async function callOpenAI(payload) {
-  // payload là object đã chuẩn bị (model, messages, ...)
   const res = await fetch("/.netlify/functions/openai", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload), // sử dụng payload
+    body: JSON.stringify(payload),
   });
 
   const data = await res.json();
+
   let parsed = {};
   try {
-    parsed = JSON.parse(data.result); // parse kết quả từ backend
+    parsed = JSON.parse(data.result); // data.result là string
   } catch (e) {
     console.error("Invalid JSON from backend:", data.result);
+    parsed = {};
   }
 
-  return parsed; // return kết quả để handleSearch dùng
+  // Chuẩn hóa key từ snake_case -> camelCase
+  return {
+    objectKeywords: parsed.object_keywords || [],
+    contextKeywords: parsed.context_keywords || [],
+  };
 }
 
 export default function TreeViewer() {
@@ -250,28 +254,26 @@ Output JSON like: {"objectKeywords": [...], "contextKeywords": [...]}`,
 
     // Step 3: Gọi GPT để xếp hạng
     const rankContent = await callOpenAI({
-      model: "gpt-4o-mini",
-      messages: [
-        {
-          role: "system",
-          content: `Rank HS code candidates for this query.
-Output JSON array of top 10:
-[{"htsno":"...","description":"...","score":95,"explanation":"..."}]`,
-        },
-        {
-          role: "user",
-          content: `ObjectKeywords: ${JSON.stringify(
-            objectKeywords
-          )}\nContextKeywords: ${JSON.stringify(
-            contextKeywords
-          )}\nCandidates: ${JSON.stringify(topCandidates)}`,
-        },
-      ],
-      temperature: 0,
-      max_tokens: 1000,
-    });
+  model: "gpt-4o-mini",
+  messages: [
+    {
+      role: "system",
+      content: `Rank HS code candidates for this query. Output JSON array of top 10: [{"htsno":"...","description":"...","score":95,"explanation":"..."}]`,
+    },
+    {
+      role: "user",
+      content: `ObjectKeywords: ${JSON.stringify(objectKeywords)}
+ContextKeywords: ${JSON.stringify(contextKeywords)}
+Candidates: ${JSON.stringify(topCandidates)}`,
+    },
+  ],
+  temperature: 0,
+  max_tokens: 1000,
+});
 
-    setSearchResults(rankContent.slice(0, 10));
+// đảm bảo rankContent là array
+const topResults = Array.isArray(rankContent) ? rankContent.slice(0, 10) : [];
+setSearchResults(topResults);
   } catch (err) {
     console.error("Search error:", err);
     setSearchError(err.message);
@@ -424,6 +426,7 @@ Output JSON array of top 10:
     </div>
   );
 }
+
 
 
 
