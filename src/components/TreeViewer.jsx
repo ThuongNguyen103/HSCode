@@ -6,7 +6,6 @@ import {
   ArrowLeft,
   Search,
 } from "lucide-react";
-const apiKey = import.meta.env.VITE_OPENAI_API_KEY;
 
 function TreeNode({ node, level = 0, onFocusNode }) {
   const [open, setOpen] = useState(false);
@@ -197,37 +196,24 @@ export default function TreeViewer() {
 
     try {
       // Step 1: Extract object + context keywords
-      const extractRes = await fetch(
-        "https://api.openai.com/v1/chat/completions",
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${apiKey}`,
-          },
-          body: JSON.stringify({
+      const extractRes = await fetch("/.netlify/functions/openai", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          url: "https://api.openai.com/v1/chat/completions",
+          payload: {
             model: "gpt-4o-mini",
             messages: [
               {
                 role: "system",
-                content: `You are an assistant specialized in HS code search.
-Return JSON only:
-{
-  "translated": "...",
-  "objectKeywords": ["..."],
-  "contextKeywords": ["..."]
-}
-Rules:
-- Extract nouns that represent goods into objectKeywords (coin, horse, textile).
-- Extract modifiers, attributes, and historical/cultural references into contextKeywords (gold, ancient, historical, collectible, currency).
-- Normalize historical references (e.g., "Ly Thai To" -> "historical", "ancient", "Vietnamese history").`,
+                content: `You are an assistant specialized in HS code search...`,
               },
               { role: "user", content: searchQuery },
             ],
             temperature: 0,
-          }),
-        }
-      );
+          },
+        }),
+      });
 
       if (!extractRes.ok)
         throw new Error(`Keyword extraction failed: ${extractRes.status}`);
