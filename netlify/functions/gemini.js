@@ -1,7 +1,8 @@
-const fetch = require('node-fetch');
-
 exports.handler = async function (event) {
   try {
+    // Sử dụng import() động để nhập node-fetch
+    const { default: fetch } = await import("node-fetch");
+
     const body = JSON.parse(event.body || "{}");
     const { messages, model, temperature, max_tokens, systemInstruction } = body;
 
