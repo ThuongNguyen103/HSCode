@@ -1,5 +1,4 @@
 // netlify/functions/openai.js
-import fetch from "node-fetch";
 
 export async function handler(event) {
   try {
@@ -38,13 +37,9 @@ export async function handler(event) {
 
     const data = await resp.json();
 
-    // Lấy phần text trong completion
-    const content =
-      data.choices?.[0]?.message?.content || JSON.stringify(data);
-
     return {
       statusCode: 200,
-      body: JSON.stringify({ content }),
+      body: JSON.stringify(data),
     };
   } catch (err) {
     return {
