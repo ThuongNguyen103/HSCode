@@ -203,7 +203,7 @@ export default function TreeViewer() {
 
   try {
     // Step 1: extract keywords
-    const extractContent = await callOpenAI([
+    const extractContentRaw = await callOpenAI([
       {
         role: "system",
         content: `You are an assistant specialized in HS code search.
@@ -217,16 +217,28 @@ Rules:
 - Extract nouns that represent goods into objectKeywords (coin, horse, textile).
 - Extract modifiers, attributes, and historical/cultural references into contextKeywords (gold, ancient, historical, collectible, currency).
 - Normalize historical references (e.g., "Ly Thai To" -> "historical", "ancient", "Vietnamese history").`,
-              },
+      },
       { role: "user", content: searchQuery },
     ]);
 
-    const objectKeywords = (extractContent.objectKeywords || []).map((k) =>
-      k.toLowerCase()
-    );
-    const contextKeywords = (extractContent.contextKeywords || []).map((k) =>
-      k.toLowerCase()
-    );
+    // parse extractContent chắc chắn là object
+    let extractContent = {};
+    if (typeof extractContentRaw === "string") {
+      try {
+        extractContent = JSON.parse(extractContentRaw);
+      } catch (e) {
+        extractContent = {};
+      }
+    } else if (typeof extractContentRaw === "object" && extractContentRaw !== null) {
+      extractContent = extractContentRaw;
+    }
+
+    const objectKeywords = Array.isArray(extractContent.objectKeywords)
+      ? extractContent.objectKeywords.map((k) => k.toLowerCase())
+      : [];
+    const contextKeywords = Array.isArray(extractContent.contextKeywords)
+      ? extractContent.contextKeywords.map((k) => k.toLowerCase())
+      : [];
 
     // Step 2: local scoring
     const flatData = flattenTree(treeData);
@@ -243,7 +255,7 @@ Rules:
       .slice(0, 30);
 
     // Step 3: GPT ranking
-    const topResults = await callOpenAI([
+    const topResultsRaw = await callOpenAI([
       {
         role: "system",
         content: `You are an assistant that ranks HS code candidates for a search query.
@@ -260,16 +272,27 @@ Guidelines:
 7. Ignore irrelevant domains (e.g., watches, jewelry) if objectKeywords contain "coin" or "currency".
 8. Output only JSON array of top 10 like:
    [{"htsno": "...", "description": "...", "score": 95, "explanation": "..."}]`,
-              },
+      },
       {
         role: "user",
-        content: `ObjectKeywords: ${JSON.stringify(
-          objectKeywords
-        )}\nContextKeywords: ${JSON.stringify(
-          contextKeywords
-        )}\nCandidates: ${JSON.stringify(scored)}`,
+        content: `ObjectKeywords: ${JSON.stringify(objectKeywords)}
+ContextKeywords: ${JSON.stringify(contextKeywords)}
+Candidates: ${JSON.stringify(scored)}`,
       },
     ]);
+
+    // parse topResults chắc chắn là array
+    let topResults = [];
+    if (Array.isArray(topResultsRaw)) {
+      topResults = topResultsRaw;
+    } else if (typeof topResultsRaw === "string") {
+      try {
+        const parsed = JSON.parse(topResultsRaw);
+        if (Array.isArray(parsed)) topResults = parsed;
+      } catch (e) {
+        topResults = [];
+      }
+    }
 
     // Merge fullDescription từ local
     const enrichedRank = topResults.map((r) => {
@@ -430,6 +453,7 @@ Guidelines:
     </div>
   );
 }
+
 
 
 
