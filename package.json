@@ -12,6 +12,7 @@
     "keyword-extractor": "^0.0.28",
     "lucide-react": "^0.542.0",
     "node-fetch": "^3.3.2",
+    "openai": "^5.19.1",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
     "string-similarity": "^4.0.4"
