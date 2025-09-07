@@ -1,8 +1,7 @@
+import fetch from "cross-fetch";
+
 export async function handler(event) {
   try {
-    // Import động node-fetch vì nó là một ES module
-    const { default: fetch } = await import("node-fetch");
-
     const body = JSON.parse(event.body || "{}");
     const { messages, model, temperature, max_tokens, systemInstruction } = body;
 
