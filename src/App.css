@@ -1,0 +1,141 @@
+body {
+  background: #f8fafc;
+  font-family: system-ui, sans-serif;
+  color: #1e293b;
+}
+
+.App {
+  max-width: 1600px; /* Tăng lên 1600px để hỗ trợ thanh tìm kiếm dài hơn */
+  margin: 0 auto;
+  padding: 1rem;
+  text-align: left;
+}
+
+/* Khung chứa cây */
+.tree-container {
+  background: #fff;
+  border: 1px solid #e2e8f0;
+  border-radius: 0.5rem;
+  padding: 1rem;
+  max-height: 80vh;
+  overflow-y: auto;
+  box-shadow: 0 2px 6px rgba(0,0,0,0.08);
+}
+
+/* Wrapper cho node để hỗ trợ animation */
+.tree-node-wrapper {
+  transition: all 0.3s ease;
+}
+
+/* Một node */
+.tree-node {
+  display: flex;
+  align-items: flex-start;
+  padding: 0.35rem 0.5rem;
+  border-radius: 0.25rem;
+  cursor: pointer;
+  transition: background 0.2s ease, transform 0.2s ease;
+}
+
+.tree-node:hover {
+  background: #f1f5f9;
+  transform: translateX(4px);
+}
+
+.tree-node:active {
+  transform: scale(0.98);
+}
+
+/* icon */
+.tree-icon {
+  margin-right: 0.5rem;
+  margin-top: 0.15rem;
+  flex-shrink: 0;
+  transition: transform 0.2s ease;
+}
+
+.tree-icon svg {
+  transition: transform 0.2s ease;
+}
+
+.tree-node:hover .tree-icon svg {
+  transform: scale(1.1);
+}
+
+/* Mã HS */
+.tree-code {
+  font-weight: 600;
+  color: #0f172a;
+  margin-right: 0.5rem;
+  transition: color 0.2s ease;
+}
+
+.tree-node:hover .tree-code {
+  color: #1e40af;
+}
+
+/* Group node */
+.tree-group {
+  font-style: italic;
+  color: #0369a1;
+  transition: color 0.2s ease;
+}
+
+.tree-node:hover .tree-group {
+  color: #1e40af;
+}
+
+/* Mô tả */
+.tree-desc {
+  color: #475569;
+  transition: color 0.2s ease;
+}
+
+.tree-node:hover .tree-desc {
+  color: #1e293b;
+}
+
+/* Animation cho phần tử con */
+.tree-children {
+  overflow: hidden;
+  max-height: 0;
+  opacity: 0;
+  transition: max-height 0.4s ease-out, opacity 0.3s ease-out;
+}
+
+.tree-children.open {
+  max-height: 1000px;
+  opacity: 1;
+}
+
+/* Hiệu ứng loading */
+.loading-spinner {
+  text-align: center;
+  font-size: 1.2rem;
+  color: #475569;
+  animation: fade 1.5s infinite;
+}
+
+.error-message {
+  color: #dc3545;
+  text-align: center;
+}
+
+@keyframes fade {
+  0%, 100% { opacity: 0.4; }
+  50% { opacity: 1; }
+}
+
+/* Hiệu ứng cho panel mô tả */
+.description-panel {
+  transition: transform 0.3s ease, opacity 0.3s ease;
+}
+
+.description-panel:hover {
+  transform: translateY(-4px);
+  box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+}
+
+table, th, td {
+  border: 1px solid #444 !important;
+}
