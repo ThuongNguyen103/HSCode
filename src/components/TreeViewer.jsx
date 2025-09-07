@@ -129,15 +129,20 @@ function getFullDescription(node, tree) {
     .join("");
 }
 
-async function callOpenAI(messages, model = "gpt-3.5-turbo") {
-  const res = await fetch("/.netlify/functions/openai", {
+async function callGemini(messages, model = "gemini-2.5-flash-preview-05-20", systemInstruction) {
+  const res = await fetch("/.netlify/functions/gemini", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ messages, model }),
+    body: JSON.stringify({ messages, model, systemInstruction }),
   });
+  
+  if (!res.ok) {
+    const errorBody = await res.json();
+    throw new Error(errorBody.error || "API call failed");
+  }
 
   const data = await res.json();
-  return data.result;
+  return JSON.parse(data.result);
 }
 
 
@@ -193,20 +198,22 @@ export default function TreeViewer() {
   );
 
   const handleSearch = useCallback(async () => {
-  if (!searchQuery.trim()) {
+    if (!searchQuery.trim()) {
+      setSearchResults([]);
+      return;
+    }
+    setSearchLoading(true);
+    setSearchError(null);
     setSearchResults([]);
-    return;
-  }
-  setSearchLoading(true);
-  setSearchError(null);
-  setSearchResults([]);
 
-  try {
-    // Step 1: extract keywords
-    const extractContentRaw = await callOpenAI([
-      {
-        role: "system",
-        content: `You are an assistant specialized in HS code search.
+    try {
+      // Step 1: extract keywords
+      const extractContent = await callGemini(
+        [{ parts: [{ text: searchQuery }] }],
+        "gemini-2.5-flash-preview-05-20",
+        {
+          parts: [{
+            text: `You are an assistant specialized in HS code search.
 Return JSON only:
 {
   "translated": "...",
@@ -217,48 +224,40 @@ Rules:
 - Extract nouns that represent goods into objectKeywords (coin, horse, textile).
 - Extract modifiers, attributes, and historical/cultural references into contextKeywords (gold, ancient, historical, collectible, currency).
 - Normalize historical references (e.g., "Ly Thai To" -> "historical", "ancient", "Vietnamese history").`,
-      },
-      { role: "user", content: searchQuery },
-    ]);
+          }],
+        },
+      );
 
-    // parse extractContent chắc chắn là object
-    let extractContent = {};
-    if (typeof extractContentRaw === "string") {
-      try {
-        extractContent = JSON.parse(extractContentRaw);
-      } catch (e) {
-        extractContent = {};
-      }
-    } else if (typeof extractContentRaw === "object" && extractContentRaw !== null) {
-      extractContent = extractContentRaw;
-    }
+      const objectKeywords = Array.isArray(extractContent.objectKeywords)
+        ? extractContent.objectKeywords.map((k) => k.toLowerCase())
+        : [];
+      const contextKeywords = Array.isArray(extractContent.contextKeywords)
+        ? extractContent.contextKeywords.map((k) => k.toLowerCase())
+        : [];
 
-    const objectKeywords = Array.isArray(extractContent.objectKeywords)
-      ? extractContent.objectKeywords.map((k) => k.toLowerCase())
-      : [];
-    const contextKeywords = Array.isArray(extractContent.contextKeywords)
-      ? extractContent.contextKeywords.map((k) => k.toLowerCase())
-      : [];
+      // Step 2: local scoring
+      const flatData = flattenTree(treeData);
+      const candidates = flatData.filter((n) => n.htsno && n.description);
+      const scored = candidates
+        .map((c) => ({
+          ...c,
+          fullDescription: getFullDescription(c, treeData),
+          localSim: [...objectKeywords, ...contextKeywords].filter((kw) =>
+            getFullDescription(c, treeData).toLowerCase().includes(kw)
+          ).length,
+        }))
+        .sort((a, b) => b.localSim - a.localSim)
+        .slice(0, 30);
 
-    // Step 2: local scoring
-    const flatData = flattenTree(treeData);
-    const candidates = flatData.filter((n) => n.htsno && n.description);
-    const scored = candidates
-      .map((c) => ({
-        ...c,
-        fullDescription: getFullDescription(c, treeData),
-        localSim: [...objectKeywords, ...contextKeywords].filter((kw) =>
-          getFullDescription(c, treeData).toLowerCase().includes(kw)
-        ).length,
-      }))
-      .sort((a, b) => b.localSim - a.localSim)
-      .slice(0, 30);
-
-    // Step 3: GPT ranking
-    const topResultsRaw = await callOpenAI([
-      {
-        role: "system",
-        content: `You are an assistant that ranks HS code candidates for a search query.
+      // Step 3: Gemini ranking
+      const topResults = await callGemini(
+        [{ parts: [{ text: `ObjectKeywords: ${JSON.stringify(objectKeywords)}
+ContextKeywords: ${JSON.stringify(contextKeywords)}
+Candidates: ${JSON.stringify(scored)}` }] }],
+        "gemini-2.5-flash-preview-05-20",
+        {
+          parts: [{
+            text: `You are an assistant that ranks HS code candidates for a search query.
 
 Guidelines:
 1. Always prefer the most specific HS code (leaf nodes with longer codes) when multiple candidates match the same keywords.
@@ -272,43 +271,25 @@ Guidelines:
 7. Ignore irrelevant domains (e.g., watches, jewelry) if objectKeywords contain "coin" or "currency".
 8. Output only JSON array of top 10 like:
    [{"htsno": "...", "description": "...", "score": 95, "explanation": "..."}]`,
-      },
-      {
-        role: "user",
-        content: `ObjectKeywords: ${JSON.stringify(objectKeywords)}
-ContextKeywords: ${JSON.stringify(contextKeywords)}
-Candidates: ${JSON.stringify(scored)}`,
-      },
-    ]);
+          }],
+        },
+      );
 
-    // parse topResults chắc chắn là array
-    let topResults = [];
-    if (Array.isArray(topResultsRaw)) {
-      topResults = topResultsRaw;
-    } else if (typeof topResultsRaw === "string") {
-      try {
-        const parsed = JSON.parse(topResultsRaw);
-        if (Array.isArray(parsed)) topResults = parsed;
-      } catch (e) {
-        topResults = [];
-      }
+      // Merge fullDescription from local
+      const enrichedRank = topResults.map((r) => {
+        const found = scored.find((c) => c.htsno === r.htsno);
+        return { ...r, fullDescription: found?.fullDescription || r.description };
+      });
+
+      setSearchResults(enrichedRank.slice(0, 10));
+    } catch (err) {
+      console.error(err);
+      setSearchError(err.message);
+    } finally {
+      setSearchLoading(false);
     }
-
-    // Merge fullDescription từ local
-    const enrichedRank = topResults.map((r) => {
-      const found = scored.find((c) => c.htsno === r.htsno);
-      return { ...r, fullDescription: found?.fullDescription || r.description };
-    });
-
-    setSearchResults(enrichedRank.slice(0, 10));
-  } catch (err) {
-    console.error(err);
-    setSearchError(err.message);
-  } finally {
-    setSearchLoading(false);
-  }
-}, [searchQuery, treeData]);
-  
+  }, [searchQuery, treeData]);
+    
   const handleSelectResult = useCallback(
     (htsno) => {
       const path = findPathToNode(treeData, htsno);
@@ -453,12 +434,3 @@ Candidates: ${JSON.stringify(scored)}`,
     </div>
   );
 }
-
-
-
-
-
-
-
-
-
