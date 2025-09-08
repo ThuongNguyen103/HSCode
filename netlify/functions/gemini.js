@@ -3,19 +3,19 @@ import fetch from "cross-fetch";
 export async function handler(event) {
   try {
     const body = JSON.parse(event.body || "{}");
-    const { messages, model, temperature, max_tokens, systemInstruction } = body;
+    const { model, messages, temperature, max_tokens } = body;
 
-    const apiKey = process.env.GEMINI_API_KEY; 
+    const apiKey = process.env.GEMINI_API_KEY;
     const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
 
     const payload = {
       contents: messages,
       generationConfig: {
-        temperature: temperature,
-        max_tokens: max_tokens,
+        temperature: temperature || 0,
         responseMimeType: "application/json",
       },
-      systemInstruction: systemInstruction,
+      // Lưu ý: Gemini 1.5 Flash không hỗ trợ `systemInstruction` trong JSON,
+      // nên chúng ta sẽ bỏ nó đi và gộp vào `messages`.
     };
 
     const response = await fetch(apiUrl, {
@@ -30,12 +30,11 @@ export async function handler(event) {
     }
 
     const data = await response.json();
-    const result = data.candidates[0]?.content?.parts[0]?.text || "{}";
 
     return {
       statusCode: 200,
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ result }),
+      body: JSON.stringify({ result: data }),
     };
   } catch (err) {
     console.error("Gemini API error:", err);
@@ -45,4 +44,4 @@ export async function handler(event) {
       body: JSON.stringify({ error: err.message }),
     };
   }
-};
+}
