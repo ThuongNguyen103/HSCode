@@ -158,27 +158,27 @@ export default function TreeViewer() {
 
   // =================== Search ===================
   const handleSearch = useCallback(async () => {
-    if (!searchQuery.trim()) {
-      setSearchResults([]);
-      return;
-    }
-    setSearchLoading(true);
-    setSearchError(null);
+  if (!searchQuery.trim()) {
     setSearchResults([]);
+    return;
+  }
+  setSearchLoading(true);
+  setSearchError(null);
+  setSearchResults([]);
 
-    try {
-      // Step 1: Extract object + context keywords using serverless function
-      const extractRes = await fetch("/.netlify/functions/gemini-proxy", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          model: "gemini-1.5-flash", // Sử dụng mô hình mới
-          messages: [
-            {
-              role: "user",
-              parts: [
-                {
-                  text: `You are an assistant specialized in HS code search.
+  try {
+    // Gọi đến hàm serverless 'gemini'
+    const extractRes = await fetch("/.netlify/functions/gemini", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        model: "gemini-1.5-flash",
+        messages: [
+          {
+            role: "user",
+            parts: [
+              {
+                text: `You are an assistant specialized in HS code search.
 Return JSON only:
 {
   "translated": "...",
@@ -190,49 +190,48 @@ Rules:
 - Extract modifiers, attributes, and historical/cultural references into contextKeywords (gold, ancient, historical, collectible, currency).
 - Normalize historical references (e.g., "Ly Thai To" -> "historical", "ancient", "Vietnamese history").
 User query: ${searchQuery}`,
-                },
-              ],
-            },
-          ],
-        }),
-      });
+              },
+            ],
+          },
+        ],
+      }),
+    });
 
-      if (!extractRes.ok)
-        throw new Error(`Keyword extraction failed: ${extractRes.status}`);
-      const extractData = await extractRes.json();
-      const parsedExtract = JSON.parse(
-        extractData.result.candidates[0].content.parts[0].text
-      );
-      const objectKeywords = (parsedExtract.objectKeywords || []).map((k) => k.toLowerCase());
-      const contextKeywords = (parsedExtract.contextKeywords || []).map((k) => k.toLowerCase());
+    if (!extractRes.ok)
+      throw new Error(`Keyword extraction failed: ${extractRes.status}`);
+    const extractData = await extractRes.json();
+    const parsedExtract = JSON.parse(
+      extractData.result.candidates[0].content.parts[0].text
+    );
+    const objectKeywords = (parsedExtract.objectKeywords || []).map((k) => k.toLowerCase());
+    const contextKeywords = (parsedExtract.contextKeywords || []).map((k) => k.toLowerCase());
 
-      // Step 2: Local scoring
-      const flatData = flattenTree(treeData);
-      const candidates = flatData.filter((n) => n.htsno && n.description);
-      const scored = candidates
-        .map((c) => ({
-          ...c,
-          fullDescription: getFullDescription(c, treeData),
-          localSim: [...objectKeywords, ...contextKeywords].filter((kw) =>
-            getFullDescription(c, treeData).toLowerCase().includes(kw)
-          ).length,
-        }))
-        .sort((a, b) => b.localSim - a.localSim)
-        .slice(0, 30);
+    // Step 2: Local scoring
+    const flatData = flattenTree(treeData);
+    const candidates = flatData.filter((n) => n.htsno && n.description);
+    const scored = candidates
+      .map((c) => ({
+        ...c,
+        fullDescription: getFullDescription(c, treeData),
+        localSim: [...objectKeywords, ...contextKeywords].filter((kw) =>
+          getFullDescription(c, treeData).toLowerCase().includes(kw)
+        ).length,
+      }))
+      .sort((a, b) => b.localSim - a.localSim)
+      .slice(0, 30);
 
-      // Step 3: Rank with Gemini using serverless function
-      const rankRes = await fetch("/.netlify/functions/gemini-proxy", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          model: "gemini-1.5-flash", // Sử dụng mô hình mới
-          messages: [
-            {
-              role: "user",
-              parts: [
-                {
-                  text: `You are an assistant that ranks HS code candidates for a search query.
-
+    // Gọi đến hàm serverless 'gemini' một lần nữa
+    const rankRes = await fetch("/.netlify/functions/gemini", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        model: "gemini-1.5-flash",
+        messages: [
+          {
+            role: "user",
+            parts: [
+              {
+                text: `You are an assistant that ranks HS code candidates for a search query.
 Guidelines:
 1. Always prefer the most specific HS code (leaf nodes with longer codes) when multiple candidates match the same keywords.
    - Example: If both "0203.12" and "0203.12.10.10" match, then "0203.12.10.10" MUST have a higher score than its parent "0203.12".
@@ -245,50 +244,45 @@ Guidelines:
 7. Ignore irrelevant domains (e.g., watches, jewelry) if objectKeywords contain "coin" or "currency".
 8. Output only JSON array of top 10 like:
    [{"htsno": "...", "description": "...", "score": 95, "explanation": "..."}]
+ObjectKeywords: ${JSON.stringify(objectKeywords)}\nContextKeywords: ${JSON.stringify(contextKeywords)}\nCandidates: ${JSON.stringify(scored)}`,
+              },
+            ],
+          },
+        ],
+      }),
+    });
 
-ObjectKeywords: ${JSON.stringify(
-                      objectKeywords
-                    )}\nContextKeywords: ${JSON.stringify(
-                      contextKeywords
-                    )}\nCandidates: ${JSON.stringify(scored)}`,
-                },
-              ],
-            },
-          ],
-        }),
-      });
-
-      if (!rankRes.ok)
-        throw new Error(`Ranking failed: ${rankRes.status}`);
-      const rankData = await rankRes.json();
-      const messageContent =
-        rankData.result.candidates[0]?.content?.parts[0]?.text || "[]";
-      let parsedRank = [];
-      try {
-        parsedRank = JSON.parse(messageContent);
-      } catch (e) {
-        const match = messageContent.match(/\[[\s\S]*\]/);
-        if (match) parsedRank = JSON.parse(match[0]);
-      }
-      const topResults = Array.isArray(parsedRank) ? parsedRank : [];
-
-      // Merge fullDescription
-      const enrichedRank = topResults.map((r) => {
-        const found = scored.find((c) => c.htsno === r.htsno);
-        return {
-          ...r,
-          fullDescription: found ? found.fullDescription : r.description,
-        };
-      });
-
-      setSearchResults(enrichedRank.slice(0, 10));
-    } catch (err) {
-      console.error(err);
-      setSearchError(err.message);
-    } finally {
-      setSearchLoading(false);
+    if (!rankRes.ok)
+      throw new Error(`Ranking failed: ${rankRes.status}`);
+    const rankData = await rankRes.json();
+    const messageContent =
+      rankData.result.candidates[0]?.content?.parts[0]?.text || "[]";
+    let parsedRank = [];
+    try {
+      parsedRank = JSON.parse(messageContent);
+    } catch (e) {
+      const match = messageContent.match(/\[[\s\S]*\]/);
+      if (match) parsedRank = JSON.parse(match[0]);
     }
-  }, [searchQuery, treeData]);
+    const topResults = Array.isArray(parsedRank) ? parsedRank : [];
+
+    // Merge fullDescription
+    const enrichedRank = topResults.map((r) => {
+      const found = scored.find((c) => c.htsno === r.htsno);
+      return {
+        ...r,
+        fullDescription: found ? found.fullDescription : r.description,
+      };
+    });
+
+    setSearchResults(enrichedRank.slice(0, 10));
+  } catch (err) {
+    console.error(err);
+    setSearchError(err.message);
+  } finally {
+    setSearchLoading(false);
+  }
+}, [searchQuery, treeData]);
 
   const handleSelectResult = useCallback(
     (htsno) => {
@@ -414,3 +408,4 @@ ObjectKeywords: ${JSON.stringify(
     </div>
   );
 }
+
