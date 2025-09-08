@@ -1,5 +1,11 @@
 import React, { useState, useEffect, useMemo, useCallback } from "react";
-import { ChevronRight, ChevronDown, FileText, ArrowLeft, Search } from "lucide-react";
+import {
+  ChevronRight,
+  ChevronDown,
+  FileText,
+  ArrowLeft,
+  Search,
+} from "lucide-react";
 
 // =================== Tree Node Component ===================
 function TreeNode({ node, level = 0, onFocusNode }) {
@@ -15,28 +21,49 @@ function TreeNode({ node, level = 0, onFocusNode }) {
     if (hasChildren) onFocusNode(node);
   }, [hasChildren, onFocusNode, node]);
 
-  const visibleChildren = useMemo(() => (open && hasChildren ? node.children : []), [open, hasChildren, node.children]);
+  const visibleChildren = useMemo(
+    () => (open && hasChildren ? node.children : []),
+    [open, hasChildren, node.children]
+  );
 
   return (
     <div style={{ marginLeft: level * 16 }} className="tree-node-wrapper">
       <div className="tree-node" onClick={handleToggle} onDoubleClick={handleDoubleClick}>
         <span className="tree-icon">
-          {hasChildren ? (open ? <ChevronDown size={16} className="text-gray-600" /> : <ChevronRight size={16} className="text-gray-600" />)
-            : <FileText size={16} className="text-gray-400" />}
+          {hasChildren ? (
+            open ? (
+              <ChevronDown size={16} className="text-gray-600" />
+            ) : (
+              <ChevronRight size={16} className="text-gray-600" />
+            )
+          ) : (
+            <FileText size={16} className="text-gray-400" />
+          )}
         </span>
         {isGroup ? (
-          <span className="tree-group" dangerouslySetInnerHTML={{ __html: node.description || "" }} />
+          <span
+            className="tree-group"
+            dangerouslySetInnerHTML={{ __html: node.description || "" }}
+          />
         ) : (
           <>
             <span className="tree-code">{node.htsno || ""}</span>
-            <span className="tree-desc" dangerouslySetInnerHTML={{ __html: node.description || "" }} />
+            <span
+              className="tree-desc"
+              dangerouslySetInnerHTML={{ __html: node.description || "" }}
+            />
           </>
         )}
       </div>
       {visibleChildren.length > 0 && (
         <div className={`tree-children ${open ? "open" : ""}`}>
           {visibleChildren.map((child, i) => (
-            <TreeNode key={i} node={child} level={level + 1} onFocusNode={onFocusNode} />
+            <TreeNode
+              key={i}
+              node={child}
+              level={level + 1}
+              onFocusNode={onFocusNode}
+            />
           ))}
         </div>
       )}
@@ -50,7 +77,8 @@ function flattenTree(tree) {
   function traverse(node) {
     if (!node) return;
     flat.push(node);
-    if (node.children && Array.isArray(node.children)) node.children.forEach(traverse);
+    if (node.children && Array.isArray(node.children))
+      node.children.forEach(traverse);
   }
   tree.forEach(traverse);
   return flat;
@@ -70,11 +98,20 @@ function findPathToNode(tree, htsno, path = []) {
 
 function getFullDescription(node, tree) {
   const path = findPathToNode(tree, node.htsno) || [];
-  return path.map((n, idx) => `<div style="margin-left:${idx * 12}px"><strong>${n.htsno || ""}</strong> ${n.description || ""}</div>`).join("");
+  return path
+    .map(
+      (n, idx) =>
+        `<div style="margin-left:${idx * 12}px"><strong>${
+          n.htsno || ""
+        }</strong> ${n.description || ""}</div>`
+    )
+    .join("");
 }
 
 function collectWithParents(path) {
-  return path.map(n => `<div><strong>${n.htsno || ""}</strong> ${n.description || ""}</div>`).join("");
+  return path
+    .map((n) => `<div><strong>${n.htsno || ""}</strong> ${n.description || ""}</div>`)
+    .join("");
 }
 
 // =================== TreeViewer Component ===================
@@ -107,11 +144,17 @@ export default function TreeViewer() {
     loadData();
   }, []);
 
-  const focusedNode = useMemo(() => currentPath.length > 0 ? currentPath[currentPath.length - 1] : { description: "HTS Full Tree", children: treeData }, [currentPath, treeData]);
+  const focusedNode = useMemo(
+    () =>
+      currentPath.length > 0
+        ? currentPath[currentPath.length - 1]
+        : { description: "HTS Full Tree", children: treeData },
+    [currentPath, treeData]
+  );
   const memoizedChildren = useMemo(() => focusedNode.children || [], [focusedNode]);
 
-  const handleFocusNode = useCallback((node) => setCurrentPath(prev => [...prev, node]), []);
-  const handleBack = useCallback(() => setCurrentPath(prev => prev.slice(0, -1)), []);
+  const handleFocusNode = useCallback((node) => setCurrentPath((prev) => [...prev, node]), []);
+  const handleBack = useCallback(() => setCurrentPath((prev) => prev.slice(0, -1)), []);
 
   // =================== Search ===================
   const handleSearch = useCallback(async () => {
@@ -124,16 +167,18 @@ export default function TreeViewer() {
     setSearchResults([]);
 
     try {
-      // Step 1: Extract object + context keywords
-      const extractRes = await fetch("/.netlify/functions/openai", {
+      // Step 1: Extract object + context keywords using serverless function
+      const extractRes = await fetch("/.netlify/functions/gemini-proxy", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          model: "gpt-4o-mini",
+          model: "gemini-1.5-flash", // Sử dụng mô hình mới
           messages: [
             {
-              role: "system",
-              content: `You are an assistant specialized in HS code search.
+              role: "user",
+              parts: [
+                {
+                  text: `You are an assistant specialized in HS code search.
 Return JSON only:
 {
   "translated": "...",
@@ -143,42 +188,50 @@ Return JSON only:
 Rules:
 - Extract nouns that represent goods into objectKeywords (coin, horse, textile).
 - Extract modifiers, attributes, and historical/cultural references into contextKeywords (gold, ancient, historical, collectible, currency).
-- Normalize historical references (e.g., "Ly Thai To" -> "historical", "ancient", "Vietnamese history").`
+- Normalize historical references (e.g., "Ly Thai To" -> "historical", "ancient", "Vietnamese history").
+User query: ${searchQuery}`,
+                },
+              ],
             },
-            { role: "user", content: searchQuery }
           ],
-          temperature: 0
-        })
+        }),
       });
 
-      if (!extractRes.ok) throw new Error(`Keyword extraction failed: ${extractRes.status}`);
+      if (!extractRes.ok)
+        throw new Error(`Keyword extraction failed: ${extractRes.status}`);
       const extractData = await extractRes.json();
-      const parsedExtract = extractData.result;
-      const objectKeywords = (parsedExtract.objectKeywords || []).map(k => k.toLowerCase());
-      const contextKeywords = (parsedExtract.contextKeywords || []).map(k => k.toLowerCase());
+      const parsedExtract = JSON.parse(
+        extractData.result.candidates[0].content.parts[0].text
+      );
+      const objectKeywords = (parsedExtract.objectKeywords || []).map((k) => k.toLowerCase());
+      const contextKeywords = (parsedExtract.contextKeywords || []).map((k) => k.toLowerCase());
 
       // Step 2: Local scoring
       const flatData = flattenTree(treeData);
-      const candidates = flatData.filter(n => n.htsno && n.description);
+      const candidates = flatData.filter((n) => n.htsno && n.description);
       const scored = candidates
-        .map(c => ({
+        .map((c) => ({
           ...c,
           fullDescription: getFullDescription(c, treeData),
-          localSim: [...objectKeywords, ...contextKeywords].filter(kw => getFullDescription(c, treeData).toLowerCase().includes(kw)).length
+          localSim: [...objectKeywords, ...contextKeywords].filter((kw) =>
+            getFullDescription(c, treeData).toLowerCase().includes(kw)
+          ).length,
         }))
         .sort((a, b) => b.localSim - a.localSim)
         .slice(0, 30);
 
-      // Step 3: Rank with GPT
-      const rankRes = await fetch("/.netlify/functions/openai", {
+      // Step 3: Rank with Gemini using serverless function
+      const rankRes = await fetch("/.netlify/functions/gemini-proxy", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          model: "gpt-4o-mini",
+          model: "gemini-1.5-flash", // Sử dụng mô hình mới
           messages: [
             {
-              role: "system",
-              content: `You are an assistant that ranks HS code candidates for a search query.
+              role: "user",
+              parts: [
+                {
+                  text: `You are an assistant that ranks HS code candidates for a search query.
 
 Guidelines:
 1. Always prefer the most specific HS code (leaf nodes with longer codes) when multiple candidates match the same keywords.
@@ -191,26 +244,41 @@ Guidelines:
 6. Penalize parent/general codes if a more specific child code matches; parent codes should not appear above their children in the ranking.
 7. Ignore irrelevant domains (e.g., watches, jewelry) if objectKeywords contain "coin" or "currency".
 8. Output only JSON array of top 10 like:
-   [{"htsno": "...", "description": "...", "score": 95, "explanation": "..."}]`
+   [{"htsno": "...", "description": "...", "score": 95, "explanation": "..."}]
+
+ObjectKeywords: ${JSON.stringify(
+                      objectKeywords
+                    )}\nContextKeywords: ${JSON.stringify(
+                      contextKeywords
+                    )}\nCandidates: ${JSON.stringify(scored)}`,
+                },
+              ],
             },
-            {
-              role: "user",
-              content: `ObjectKeywords: ${JSON.stringify(objectKeywords)}\nContextKeywords: ${JSON.stringify(contextKeywords)}\nCandidates: ${JSON.stringify(scored)}`
-            }
           ],
-          temperature: 0,
-          max_tokens: 1000
-        })
+        }),
       });
 
-      if (!rankRes.ok) throw new Error(`Ranking failed: ${rankRes.status}`);
+      if (!rankRes.ok)
+        throw new Error(`Ranking failed: ${rankRes.status}`);
       const rankData = await rankRes.json();
-      const topResults = Array.isArray(rankData.result) ? rankData.result : [];
+      const messageContent =
+        rankData.result.candidates[0]?.content?.parts[0]?.text || "[]";
+      let parsedRank = [];
+      try {
+        parsedRank = JSON.parse(messageContent);
+      } catch (e) {
+        const match = messageContent.match(/\[[\s\S]*\]/);
+        if (match) parsedRank = JSON.parse(match[0]);
+      }
+      const topResults = Array.isArray(parsedRank) ? parsedRank : [];
 
       // Merge fullDescription
-      const enrichedRank = topResults.map(r => {
-        const found = scored.find(c => c.htsno === r.htsno);
-        return { ...r, fullDescription: found ? found.fullDescription : r.description };
+      const enrichedRank = topResults.map((r) => {
+        const found = scored.find((c) => c.htsno === r.htsno);
+        return {
+          ...r,
+          fullDescription: found ? found.fullDescription : r.description,
+        };
       });
 
       setSearchResults(enrichedRank.slice(0, 10));
@@ -222,10 +290,13 @@ Guidelines:
     }
   }, [searchQuery, treeData]);
 
-  const handleSelectResult = useCallback(htsno => {
-    const path = findPathToNode(treeData, htsno);
-    if (path) setCurrentPath(path.slice(0, -1));
-  }, [treeData]);
+  const handleSelectResult = useCallback(
+    (htsno) => {
+      const path = findPathToNode(treeData, htsno);
+      if (path) setCurrentPath(path.slice(0, -1));
+    },
+    [treeData]
+  );
 
   // =================== Render ===================
   if (isLoading) return <div className="loading-spinner">Loading...</div>;
@@ -235,7 +306,9 @@ Guidelines:
     <div className="p-6 h-screen flex flex-col">
       {/* Search bar */}
       <div className="mb-6 flex items-center w-full bg-white rounded-xl shadow-md border border-gray-300 overflow-hidden">
-        <div className="px-3 text-gray-500"><Search size={20} /></div>
+        <div className="px-3 text-gray-500">
+          <Search size={20} />
+        </div>
         <input
           type="text"
           value={searchQuery}
@@ -259,50 +332,82 @@ Guidelines:
       <div className="flex flex-1 border rounded-lg overflow-hidden shadow">
         {/* Left: search results */}
         <div className="w-1/3 bg-white border-r overflow-y-auto">
-          <h2 className="text-lg font-semibold p-4 border-b">Search Results</h2>
+          <h2 className="text-lg font-semibold p-4 border-b">
+            Search Results
+          </h2>
           {searchResults.length > 0 ? (
             <table className="min-w-full border border-gray-500 rounded-lg shadow-sm border-collapse overflow-x-auto">
               <thead className="bg-gray-100">
                 <tr>
                   <th className="px-4 py-2 text-left border">HS Code</th>
                   <th className="px-4 py-2 text-left border">Score</th>
-                  <th className="px-4 py-2 text-left border">Full Description</th>
+                  <th className="px-4 py-2 text-left border">
+                    Full Description
+                  </th>
                   <th className="px-4 py-2 text-left border">Explanation</th>
                 </tr>
               </thead>
               <tbody>
                 {searchResults.map((result, idx) => (
-                  <tr key={idx} className="hover:bg-gray-50 cursor-pointer" onClick={() => handleSelectResult(result.htsno)}>
-                    <td className="px-4 py-2 border font-semibold text-blue-700 truncate">{result.htsno}</td>
+                  <tr
+                    key={idx}
+                    className="hover:bg-gray-50 cursor-pointer"
+                    onClick={() => handleSelectResult(result.htsno)}
+                  >
+                    <td className="px-4 py-2 border font-semibold text-blue-700 truncate">
+                      {result.htsno}
+                    </td>
                     <td className="px-4 py-2 border">{result.score}%</td>
-                    <td className="px-4 py-2 border" dangerouslySetInnerHTML={{ __html: result.fullDescription }} />
-                    <td className="px-4 py-2 border text-sm text-gray-600 italic">{result.explanation}</td>
+                    <td
+                      className="px-4 py-2 border"
+                      dangerouslySetInnerHTML={{
+                        __html: result.fullDescription,
+                      }}
+                    />
+                    <td className="px-4 py-2 border text-sm text-gray-600 italic">
+                      {result.explanation}
+                    </td>
                   </tr>
                 ))}
               </tbody>
             </table>
-          ) : <div className="p-4 text-gray-500">No results found</div>}
+          ) : (
+            <div className="p-4 text-gray-500">No results found</div>
+          )}
         </div>
 
         {/* Right: tree details */}
         <div className="flex-1 p-4 overflow-y-auto">
           <div className="flex items-center mb-4">
             {currentPath.length > 0 && (
-              <button onClick={handleBack} className="flex items-center text-blue-600 hover:underline mr-3 transition-transform duration-200 hover:scale-105">
+              <button
+                onClick={handleBack}
+                className="flex items-center text-blue-600 hover:underline mr-3 transition-transform duration-200 hover:scale-105"
+              >
                 <ArrowLeft size={18} className="mr-1" /> Back
               </button>
             )}
-            <h1 className="text-2xl font-bold text-gray-800">{focusedNode.htsno || "HTS Full Tree"}</h1>
+            <h1 className="text-2xl font-bold text-gray-800">
+              {focusedNode.htsno || "HTS Full Tree"}
+            </h1>
           </div>
 
           <div className="mb-6">
-            {memoizedChildren.length > 0 ? memoizedChildren.map((node, idx) => <TreeNode key={idx} node={node} onFocusNode={handleFocusNode} />)
-              : <div className="text-gray-500">No data available</div>}
+            {memoizedChildren.length > 0 ? (
+              memoizedChildren.map((node, idx) => (
+                <TreeNode key={idx} node={node} onFocusNode={handleFocusNode} />
+              ))
+            ) : (
+              <div className="text-gray-500">No data available</div>
+            )}
           </div>
 
           <div className="bg-white border rounded-lg shadow p-4">
             <h2 className="text-lg font-semibold mb-2">Description</h2>
-            <div className="text-gray-700" dangerouslySetInnerHTML={{ __html: collectWithParents(currentPath) }} />
+            <div
+              className="text-gray-700"
+              dangerouslySetInnerHTML={{ __html: collectWithParents(currentPath) }}
+            />
           </div>
         </div>
       </div>
